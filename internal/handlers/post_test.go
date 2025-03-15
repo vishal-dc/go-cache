@@ -13,7 +13,7 @@ import (
 
 func TestPostHandler(t *testing.T) {
 	// Create a test value
-	value := map[string]any{"field1": "value1", "field2": 2}
+	value := map[string]any{"field1": "value1", "field2": float64(2)}
 	requestBody, err := json.Marshal(value)
 	assert.NoError(t, err)
 
