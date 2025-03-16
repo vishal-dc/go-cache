@@ -21,13 +21,12 @@ test:
 # Clean build files
 clean:
 	$(GOCLEAN)
-	rm -f ./bin/$(BINARY_NAME)
-	rm -f ./bin/$(BINARY_LINUX)
+	rm -f ./bin/*
 
 # Run the application
 run:
 	$(GOBUILD) -o ./bin/$(BINARY_NAME) -v ./cmd
-	./bin//$(BINARY_NAME)
+	./bin/$(BINARY_NAME)
 
 # Install dependencies
 # deps:

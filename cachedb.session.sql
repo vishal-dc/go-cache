@@ -1,0 +1,1 @@
+SELECT id, worker, created_at, updated_at FROM go_cache.workers where worker <> '$1'
