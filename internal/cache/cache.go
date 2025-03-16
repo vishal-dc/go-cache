@@ -36,8 +36,10 @@ func Set(key string, value map[string]any) error {
 	item, err := newItem(value)
 	if err == nil {
 		c.store[key] = item
+		conf.WriteToPool(key, value)
 		return nil
 	}
+
 	return err
 }
 

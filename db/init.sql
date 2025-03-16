@@ -7,7 +7,7 @@ CREATE SCHEMA IF NOT EXISTS go_cache;
 DROP TABLE IF EXISTS go_cache.workers;
 CREATE TABLE go_cache.workers (
     id integer PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
-    worker character varying(255) NOT NULL UNIQUE,
+    worker character varying(255) NOT NULL,
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
 );

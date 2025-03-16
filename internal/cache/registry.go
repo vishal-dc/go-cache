@@ -1,8 +1,11 @@
 package cache
 
 import (
+	"bytes"
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"time"
 
@@ -13,9 +16,10 @@ import (
 
 // create a registry to hold the db connection
 type Registry struct {
-	db   *sql.DB
-	pool map[string]Worker
-	self Worker
+	db     *sql.DB
+	pool   map[string]Worker
+	self   Worker
+	client *http.Client
 }
 
 type Worker struct {
@@ -52,26 +56,30 @@ func init() {
 	self.hostname = h + ":" + port
 	self.CreatedAt = time.Now()
 	self.Updated = time.Now()
-	workers, err := GetOtherWorkers(h)
+
+	exists, err := checkWorker(self.hostname)
 	if err != nil {
-		log.Logger.Fatal("failed to get other workers", zap.String("error", err.Error()))
+		log.Logger.Fatal("failed to check worker", zap.String("error", err.Error()))
 	}
 
-	if len(workers) > 0 {
-		log.Logger.Info("found other workers", zap.Int("count", len(workers)))
-		for _, w := range workers {
-			log.Logger.Info("worker", zap.String("worker", w.hostname), zap.Time("created_at", w.CreatedAt), zap.Time("updated_at", w.Updated))
-			conf.pool[w.hostname] = w
+	if exists {
+		if err := UpdateWorker(&self); err != nil {
+			log.Logger.Fatal("failed to update worker", zap.String("error", err.Error()))
 		}
 	} else {
-		log.Logger.Info("no other workers found at startup")
+		if err := insertWorker(&self); err != nil {
+			log.Logger.Fatal("failed to insert worker", zap.String("error", err.Error()))
+		}
 	}
 
-	if err := insertWorker(&self); err != nil {
-		log.Logger.Fatal("failed to insert worker", zap.String("error", err.Error()))
-	}
-
+	client := &http.Client{}
+	client.Timeout = 1 * time.Second
+	conf.client = client
 	conf.self = self
+
+	if err := conf.RefreshPool(); err != nil {
+		log.Logger.Fatal("failed to refresh pool", zap.String("error", err.Error()))
+	}
 }
 
 func connectToDB() (*sql.DB, error) {
@@ -111,8 +119,19 @@ func connectToDB() (*sql.DB, error) {
 	if err := db.Ping(); err != nil {
 		return nil, err
 	}
-	log.Logger.Info("Successfully connected to the database")
+	log.Logger.Info("successfully connected to the database")
 	return db, nil
+}
+
+func checkWorker(worker string) (bool, error) {
+	query := `SELECT EXISTS(SELECT 1 FROM go_cache.workers WHERE worker = $1)`
+	var exists bool
+	err := conf.db.QueryRow(query, worker).Scan(&exists)
+	if err != nil {
+		log.Logger.Error("failed to check worker", zap.String("error", err.Error()))
+		return false, err
+	}
+	return exists, nil
 }
 
 // InsertWorker inserts a new worker into the workers table
@@ -127,6 +146,18 @@ func insertWorker(worker *Worker) error {
 	}
 	worker.ID = int(id)
 	log.Logger.Info("successfully inserted worker", zap.String("worker", worker.hostname), zap.Time("created_at", worker.CreatedAt), zap.Time("updated_at", worker.Updated))
+	return nil
+}
+
+// UpdateWorker updates the worker in the workers table
+func UpdateWorker(worker *Worker) error {
+	query := `UPDATE go_cache.workers SET updated_at = $1 WHERE id = $2`
+	_, err := conf.db.Exec(query, worker.Updated, worker.ID)
+	if err != nil {
+		log.Logger.Error("failed to update worker", zap.String("error", err.Error()))
+		return err
+	}
+	log.Logger.Info("successfully updated worker", zap.String("worker", worker.hostname), zap.Time("updated_at", worker.Updated))
 	return nil
 }
 
@@ -152,4 +183,59 @@ func GetOtherWorkers(worker string) ([]Worker, error) {
 	}
 
 	return workers, nil
+}
+
+func (r *Registry) GetSelfWorker() Worker {
+	return r.self
+}
+
+// WriteToPool writes a key value to the list of workers in the pool
+func (r *Registry) WriteToPool(key string, value map[string]any) error {
+	b, err := json.Marshal(value)
+	if err != nil {
+		log.Logger.Error("failed to marshal value", zap.String("error", err.Error()))
+	}
+
+	if len(r.pool) == 0 {
+		log.Logger.Error("no workers in the pool")
+		return nil
+	}
+
+	for _, w := range r.pool {
+		log.Logger.Info("writing to worker", zap.String("worker", w.hostname))
+		resp, err := r.client.Post(fmt.Sprintf("http://%s/cache?key=%s", w.hostname, key), "application/json", bytes.NewBuffer(b))
+		if err != nil {
+			log.Logger.Error("failed to write to worker", zap.String("worker", w.hostname), zap.String("error", err.Error()))
+			continue
+		}
+		if resp.StatusCode >= http.StatusBadRequest {
+			log.Logger.Error("failed to write to worker", zap.String("worker", w.hostname), zap.Int("status_code", resp.StatusCode))
+			continue
+		}
+		log.Logger.Info("successfully wrote to worker", zap.String("worker", w.hostname))
+	}
+	return nil
+}
+
+// RefreshPool refreshes the pool of workers
+func (r *Registry) RefreshPool() error {
+	go func() {
+		for {
+			log.Logger.Info("refreshing pool")
+			workers, err := GetOtherWorkers(r.self.hostname)
+			if err != nil {
+				log.Logger.Error("failed to get other workers", zap.String("error", err.Error()))
+				continue
+			}
+
+			r.pool = make(map[string]Worker)
+			for _, w := range workers {
+				log.Logger.Info("worker", zap.String("worker", w.hostname), zap.Time("created_at", w.CreatedAt), zap.Time("updated_at", w.Updated))
+				r.pool[w.hostname] = w
+			}
+			time.Sleep(10 * time.Second)
+		}
+	}()
+
+	return nil
 }
