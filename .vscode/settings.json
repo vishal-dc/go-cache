@@ -11,5 +11,8 @@
             "username": "postgres",
             "password": "postgres"
         }
-    ]
+    ],
+    "go.toolsEnvVars": {
+        "CGO_ENABLED": "0"
+    }
 }

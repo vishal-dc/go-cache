@@ -95,3 +95,30 @@ func TestPostHandlerInvalidRequestBody(t *testing.T) {
 	// Check the response body
 	assert.Equal(t, "invalid request body\n", rr.Body.String())
 }
+
+func TestSyncPostHandler(t *testing.T) {
+	// Create a test value
+	value := map[string]any{"field1": "value1", "field2": float64(2)}
+	requestBody, err := json.Marshal(value)
+	assert.NoError(t, err)
+
+	// Create a request to pass to our handler
+	req, err := http.NewRequest("POST", "/post/sync?key=testKey", bytes.NewBuffer(requestBody))
+	assert.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+
+	// Create a ResponseRecorder to record the response
+	rr := httptest.NewRecorder()
+	handler := http.HandlerFunc(SyncPostHandler)
+
+	// Call the handler
+	handler.ServeHTTP(rr, req)
+
+	// Check the status code
+	assert.Equal(t, http.StatusNoContent, rr.Code)
+
+	// Check if the item was set in the cache
+	cachedValue, err := cache.Get("testKey")
+	assert.NoError(t, err)
+	assert.Equal(t, value, cachedValue)
+}
