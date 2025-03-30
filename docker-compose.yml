@@ -1,4 +1,6 @@
 # version: '3.8'
+include:
+  - include: docker-compose-db.yml
 
 services:
   mycache:
@@ -23,23 +25,6 @@ services:
       - DB_NAME=go_cache
     networks:
       - my-cache-network      
-  db:
-    image: postgres:14.1-alpine
-    restart: always
-    environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-    ports:
-      - '5432:5432'
-    volumes: 
-      - db:/var/lib/postgresql/data
-      - ./db/init.sql:/docker-entrypoint-initdb.d/create_tables.sql        
-    networks:
-      - my-cache-network
-
-volumes:
-  db:
-    driver: local
 
 networks:
   my-cache-network:
